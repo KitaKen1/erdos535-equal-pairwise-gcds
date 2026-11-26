@@ -77,7 +77,7 @@ where $f_r(N)$ denotes the largest size of a set avoiding the required $r$ integ
 
 ## Appendix: Verification by Lean Comparator on GitHub CI runner
 
-On pushes and pull requests, GitHub Actions builds the pinned OpenAI sunflower theorem and checks all three unconditional declarations. Lean Comparator compares each exported statement with a challenge generated from the pinned FC source. The allowed axioms are `propext`, `Classical.choice`, and `Quot.sound`. The runner also checks definitional equality with the FC types, runs `#print axioms`, and replays this repository's compiled declarations with `leanchecker` using the pinned imports. [GitHub workflow](.github/workflows/lean.yml) · [Comparator check](verification/Compare.lean)
+On pushes and pull requests, GitHub Actions builds the pinned OpenAI sunflower theorem and checks all three unconditional declarations. Lean Comparator compares statement-only exports against a challenge generated from the pinned FC source. Lean checks that each proof has the exact FC type, and `#print axioms` enforces the allowlist of `propext`, `Classical.choice`, and `Quot.sound`. `leanchecker` replays this repository's compiled declarations using the pinned imports. [GitHub workflow](.github/workflows/lean.yml) · [Comparator check](verification/Compare.lean)
 
 ### Certification within 90 days
 

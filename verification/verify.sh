@@ -70,7 +70,7 @@ if [[ -n "$comparator_dir" ]]; then
     module="${pair#*:}"
     python3 "$verification_dir/check_against_fc.py" --comparator "$mode" \
       "$fc_source" "$build_dir/$module.lean"
-    lean --root="$build_dir" -o "$build_dir/$module.olean" "$build_dir/$module.lean"
+    lean -DwarningAsError=true --root="$build_dir" -o "$build_dir/$module.olean" "$build_dir/$module.lean"
     "$exporter" "$module" -- "${targets[@]}" > "$build_dir/$module.ndjson"
   done
   LEAN_PATH="$comparator_dir/.lake/build/lib/lean:$comparator_dir/.lake/packages/lean4export/.lake/build/lib/lean" \

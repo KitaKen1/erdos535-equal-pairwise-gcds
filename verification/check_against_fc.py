@@ -85,8 +85,9 @@ def comparator_module(source, candidate):
         extract_definitions(source),
     ]
     for name, signature in zip(NAMES, extract_types(source)):
-        proof = f"exact @Erdos535.{name}" if candidate else "sorry"
-        lines.append(f"theorem {name} :\n  {signature} := by\n  {proof}")
+        lines.append(f"def {name} : Prop :=\n  {signature}")
+        if candidate:
+            lines.append(f"example : {name} := @Erdos535.{name}")
     lines.append("end FCReference")
     return "\n\n".join(lines) + "\n"
 

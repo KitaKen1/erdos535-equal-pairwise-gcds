@@ -10,8 +10,8 @@ def main (args : List String) : IO Unit := do
   let targets := #[`FCReference.erdos_535, `FCReference.erdos_535.variants.first_open_case,
     `FCReference.erdos_535.variants.sunflower_strong]
   let axioms := #[`propext, `Classical.choice, `Quot.sound]
-  IO.ofExcept <| Comparator.compareAt challenge candidate (targets ++ axioms) #[]
-    #[`optParam, `autoParam, `semiOutParam, `outParam]
-  IO.ofExcept <| Comparator.checkAxioms candidate targets #[] axioms
+  -- The targets are proposition definitions, so compare their bodies and dependencies.
+  IO.ofExcept <| Comparator.compareAt challenge candidate axioms #[]
+    (targets ++ #[`optParam, `autoParam, `semiOutParam, `outParam])
   for target in targets do
     IO.println s!"Comparator verified {target}"
