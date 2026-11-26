@@ -39,76 +39,24 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-  full-audit:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
-    env:
-      OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
-      COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
-      LEAN_TOOLCHAIN: leanprover/lean4:v4.34.1
-      LEAN_NUM_THREADS: "2"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Install elan
-        run: |
-          curl --proto '=https' --tlsv1.2 -fsSL https://elan.lean-lang.org/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
-          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none --no-modify-path
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Build the pinned Lean Comparator and exporter
-        run: |
-          git init "$RUNNER_TEMP/comparator"
-          git -C "$RUNNER_TEMP/comparator" fetch --depth=1 https://github.com/leanprover/comparator.git "$COMPARATOR_COMMIT"
-          git -C "$RUNNER_TEMP/comparator" checkout --detach FETCH_HEAD
-          cd "$RUNNER_TEMP/comparator"
-          lake "+$LEAN_TOOLCHAIN" build Comparator lean4export
-      - name: Fetch the pinned OpenAI source and Mathlib cache
-        run: |
-          mkdir -p verification/results
-          git init "$RUNNER_TEMP/openai-math"
-          git -C "$RUNNER_TEMP/openai-math" remote add origin https://github.com/openai/math.git
-          git -C "$RUNNER_TEMP/openai-math" fetch --depth=1 --filter=blob:none origin "$OPENAI_MATH_COMMIT"
-          git -C "$RUNNER_TEMP/openai-math" sparse-checkout set lean
-          git -C "$RUNNER_TEMP/openai-math" checkout --detach "$OPENAI_MATH_COMMIT"
-          cd "$RUNNER_TEMP/openai-math/lean"
-          {
-            lake update
-            lake exe cache get Mathlib
-          } 2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-setup.log"
-      - name: Restore previous upstream build
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ runner.temp }}/openai-math/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-
-      - name: Build the upstream sunflower theorem
-        id: upstream
-        run: |
-          cd "$RUNNER_TEMP/openai-math/lean"
-          timeout --kill-after=30s 260m lake build +OAI.Combinatorics.Sunflower.FixedBase:olean \
-            2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log"
-      - name: Compare the exact FC declarations and replay the compiled proof
-        run: |
-          cd "$RUNNER_TEMP/openai-math/lean"
-          lake env bash "$GITHUB_WORKSPACE/verification/verify.sh" --comparator "$RUNNER_TEMP/comparator" \
-            2>&1 | tee "$GITHUB_WORKSPACE/verification/results/full-audit.log"
-      - name: Save completed upstream modules
-        if: ${{ !cancelled() && steps.upstream.outcome != 'skipped' }}
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ${{ runner.temp }}/openai-math/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: comparator-audit-${{ github.run_id }}-${{ github.run_attempt }}
-          path: verification/results/
-          retention-days: 90
-          if-no-files-found: ignore
+  audit-first:
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: first
+      checkpoint: true
+
+  audit-resume:
+    needs: audit-first
+    if: needs.audit-first.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume
+      checkpoint: true
+
+  audit-final:
+    needs: audit-resume
+    if: needs.audit-resume.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: final
+      checkpoint: false

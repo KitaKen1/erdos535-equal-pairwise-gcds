@@ -79,9 +79,11 @@ where $f_r(N)$ denotes the largest size of a set avoiding the required $r$ integ
 
 On pushes and pull requests, GitHub Actions builds the pinned OpenAI sunflower theorem and checks all three unconditional declarations. Lean Comparator compares statement-only exports against a challenge generated from the pinned FC source. Lean checks that each proof has the exact FC type, and `#print axioms` enforces the allowlist of `propext`, `Classical.choice`, and `Quot.sound`. `leanchecker` replays this repository's compiled declarations using the pinned imports. [GitHub workflow](.github/workflows/lean.yml) · [Comparator check](verification/Compare.lean)
 
+The upstream build can continue from cached modules across up to three runners. Once it finishes, that runner performs the Comparator check and proof replay. [Resumable build](.github/workflows/comparator.yml)
+
 ### Certification within 90 days
 
-Each run uploads `comparator-audit-<run-id>-<attempt>` with the upstream build and verification logs. The separate reduction job uploads `reduction-audit-<run-id>-<attempt>`. GitHub retains these artifacts for 90 days. [GitHub Actions runs](https://github.com/KitaKen1/erdos535-equal-pairwise-gcds/actions/workflows/lean.yml)
+Each runner uploads `comparator-audit-<run-id>-<attempt>-<stage>` with its build and verification logs. The separate reduction job uploads `reduction-audit-<run-id>-<attempt>`. GitHub retains these artifacts for 90 days. [GitHub Actions runs](https://github.com/KitaKen1/erdos535-equal-pairwise-gcds/actions/workflows/lean.yml)
 
 The checked-in local audit passed on Lean 4.34.1. It compiled some upstream modules in batches to reuse imports, with name and tactic adjustments for the combined scopes. [Local type and axiom audit](verification/logs/full-audit-lean-4.34.1.txt) · [Local reduction audit](verification/logs/reduction-lean-4.34.1.txt)
 
