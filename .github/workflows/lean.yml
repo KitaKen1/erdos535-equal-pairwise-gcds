@@ -70,6 +70,7 @@ jobs:
       border-cache: ${{ needs.prepare-border.outputs.cache-key }}
       spectral-cache: ${{ needs.prepare-spectral.outputs.cache-key }}
       writer-cache: ${{ needs.prepare-writer.outputs.cache-key }}
+      serial-build: ${{ needs.prepare-border.outputs.serial-build == 'true' || needs.prepare-writer.outputs.serial-build == 'true' || needs.prepare-border.outputs.cache-key == '' }}
 
   audit-resume:
     needs: audit-first
@@ -78,6 +79,7 @@ jobs:
     with:
       stage: resume
       checkpoint: true
+      serial-build: ${{ needs.audit-first.outputs.serial-build == 'true' || needs.audit-first.outputs.cache-key == '' }}
 
   audit-resume-2:
     needs: audit-resume
@@ -86,6 +88,7 @@ jobs:
     with:
       stage: resume-2
       checkpoint: true
+      serial-build: ${{ needs.audit-resume.outputs.serial-build == 'true' || needs.audit-resume.outputs.cache-key == '' }}
 
   audit-resume-3:
     needs: audit-resume-2
@@ -94,6 +97,7 @@ jobs:
     with:
       stage: resume-3
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-2.outputs.serial-build == 'true' || needs.audit-resume-2.outputs.cache-key == '' }}
 
   audit-resume-4:
     needs: audit-resume-3
@@ -102,6 +106,7 @@ jobs:
     with:
       stage: resume-4
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-3.outputs.serial-build == 'true' || needs.audit-resume-3.outputs.cache-key == '' }}
 
   audit-resume-5:
     needs: audit-resume-4
@@ -110,6 +115,7 @@ jobs:
     with:
       stage: resume-5
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-4.outputs.serial-build == 'true' || needs.audit-resume-4.outputs.cache-key == '' }}
 
   audit-resume-6:
     needs: audit-resume-5
@@ -118,6 +124,7 @@ jobs:
     with:
       stage: resume-6
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-5.outputs.serial-build == 'true' || needs.audit-resume-5.outputs.cache-key == '' }}
 
   audit-resume-7:
     needs: audit-resume-6
@@ -126,6 +133,7 @@ jobs:
     with:
       stage: resume-7
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-6.outputs.serial-build == 'true' || needs.audit-resume-6.outputs.cache-key == '' }}
 
   audit-resume-8:
     needs: audit-resume-7
@@ -134,6 +142,7 @@ jobs:
     with:
       stage: resume-8
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-7.outputs.serial-build == 'true' || needs.audit-resume-7.outputs.cache-key == '' }}
 
   audit-resume-9:
     needs: audit-resume-8
@@ -142,6 +151,7 @@ jobs:
     with:
       stage: resume-9
       checkpoint: true
+      serial-build: ${{ needs.audit-resume-8.outputs.serial-build == 'true' || needs.audit-resume-8.outputs.cache-key == '' }}
 
   audit-final:
     needs: audit-resume-9
@@ -150,6 +160,7 @@ jobs:
     with:
       stage: final
       checkpoint: false
+      serial-build: ${{ needs.audit-resume-9.outputs.serial-build == 'true' || needs.audit-resume-9.outputs.cache-key == '' }}
 
   verification-result:
     name: Require the reduction and unconditional Lean audits

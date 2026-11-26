@@ -18,6 +18,9 @@ on:
         type: string
       writer-cache:
         type: string
+      serial-build:
+        type: boolean
+        default: false
     outputs:
       verified:
         value: ${{ jobs.audit.outputs.verified }}
@@ -25,6 +28,8 @@ on:
         value: ${{ jobs.audit.outputs.cache-key }}
       fatal:
         value: ${{ jobs.audit.outputs.fatal }}
+      serial-build:
+        value: ${{ jobs.audit.outputs.serial-build }}
 
 permissions:
   contents: read
@@ -39,6 +44,7 @@ jobs:
       verified: ${{ steps.compare.outputs.verified || 'false' }}
       cache-key: ${{ steps.upstream.outputs.cache-key }}
       fatal: ${{ steps.upstream.outputs.fatal || (steps.compare.outcome == 'failure' && 'true') || 'false' }}
+      serial-build: ${{ (inputs.serial-build || steps.upstream.outputs.serial-build == 'true') && 'true' || 'false' }}
     runs-on: ubuntu-24.04
     # The caller requires an explicit proof-verification result. A lost runner can be retried.
     continue-on-error: true
@@ -47,7 +53,7 @@ jobs:
       OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
       COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
       LEAN_TOOLCHAIN: leanprover/lean4:v4.34.1
-      LEAN_NUM_THREADS: "2"
+      LEAN_NUM_THREADS: ${{ inputs.serial-build && '1' || '2' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -144,6 +150,10 @@ jobs:
             --setenv="RUNNER_TRACKING_ID=${RUNNER_TRACKING_ID:-}" \
             /usr/bin/timeout --kill-after=30s 35m "$HOME/.elan/bin/lake" build "+$TARGET:olean" \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
+          if [[ "$status" != 0 ]] && grep -q 'Finished with result: oom-kill' "$GITHUB_WORKSPACE/verification/results/upstream-build.log"; then
+            echo 'serial-build=true' >> "$GITHUB_OUTPUT"
+            status=137
+          fi
           cache_suffix="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STAGE"
           if [[ "$status" == 0 && "$TARGET" == "$full_target" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
