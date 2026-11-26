@@ -39,11 +39,28 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
+  prepare-border:
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: border
+      target: OAI.Computability.BorderVNP.DiagonalPaidColumns
+      checkpoint: true
+
+  prepare-spectral:
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: spectral
+      target: OAI.LinearAlgebra.SpectralBooks.CompanionGeometry
+      checkpoint: true
+
   audit-first:
+    needs: [prepare-border, prepare-spectral]
     uses: ./.github/workflows/comparator.yml
     with:
       stage: first
       checkpoint: true
+      border-cache: ${{ needs.prepare-border.outputs.cache-key }}
+      spectral-cache: ${{ needs.prepare-spectral.outputs.cache-key }}
 
   audit-resume:
     needs: audit-first

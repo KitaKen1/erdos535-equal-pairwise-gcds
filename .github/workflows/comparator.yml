@@ -9,9 +9,18 @@ on:
       checkpoint:
         required: true
         type: boolean
+      target:
+        type: string
+        default: OAI.Combinatorics.Sunflower.FixedBase
+      border-cache:
+        type: string
+      spectral-cache:
+        type: string
     outputs:
       verified:
         value: ${{ jobs.audit.outputs.verified }}
+      cache-key:
+        value: ${{ jobs.audit.outputs.cache-key }}
 
 permissions:
   contents: read
@@ -24,6 +33,7 @@ jobs:
   audit:
     outputs:
       verified: ${{ steps.compare.outputs.verified || 'false' }}
+      cache-key: ${{ steps.upstream.outputs.cache-key }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
@@ -54,6 +64,8 @@ jobs:
             lake exe cache get Mathlib
           } 2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-setup.log"
       - name: Restore previous upstream build
+        id: seed
+        if: inputs.border-cache == '' || inputs.spectral-cache == ''
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -65,31 +77,64 @@ jobs:
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-complete-
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}-
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-
+      - name: Restore the BorderVNP branch
+        id: border
+        if: inputs.border-cache != ''
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/openai-math/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
+          key: ${{ inputs.border-cache }}
+      - name: Restore the SpectralBooks branch
+        id: spectral
+        if: inputs.spectral-cache != '' && inputs.spectral-cache != inputs.border-cache && !contains(steps.border.outputs.cache-matched-key, '-complete-')
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/openai-math/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
+          key: ${{ inputs.spectral-cache }}
       - name: Build the upstream sunflower theorem
         id: upstream
         env:
           CHECKPOINT: ${{ inputs.checkpoint }}
           STAGE: ${{ inputs.stage }}
+          TARGET: ${{ inputs.target }}
           CACHE_PREFIX: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}
+          RESTORED_KEY: ${{ steps.spectral.outputs.cache-matched-key || steps.border.outputs.cache-matched-key || steps.seed.outputs.cache-matched-key }}
         run: |
           cd "$RUNNER_TEMP/openai-math/lean"
+          full_target=OAI.Combinatorics.Sunflower.FixedBase
+          if [[ "$TARGET" != "$full_target" && "$RESTORED_KEY" == "$CACHE_PREFIX-complete-"* ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "cache-key=$RESTORED_KEY" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           status=0
-          timeout --kill-after=30s 300m lake build +OAI.Combinatorics.Sunflower.FixedBase:olean \
+          timeout --kill-after=30s 300m lake build "+$TARGET:olean" \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
           cache_suffix="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STAGE"
-          if [[ "$status" == 0 ]]; then
+          if [[ "$status" == 0 && "$TARGET" == "$full_target" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "cache-key=$CACHE_PREFIX-complete-$cache_suffix" >> "$GITHUB_OUTPUT"
+            if [[ "$RESTORED_KEY" == "$CACHE_PREFIX-complete-"* ]]; then
+              echo "cache-key=$RESTORED_KEY" >> "$GITHUB_OUTPUT"
+            else
+              echo "cache-key=$CACHE_PREFIX-complete-$cache_suffix" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "cache-key=$CACHE_PREFIX-$cache_suffix" >> "$GITHUB_OUTPUT"
-            if [[ "$status" != 124 || "$CHECKPOINT" != true ]]; then
+            if [[ "$status" == 124 && "$CHECKPOINT" == true ]]; then
+              echo 'Build time limit reached. The next runner will continue from the saved cache.'
+            elif [[ "$status" != 0 ]]; then
               exit "$status"
             fi
-            echo 'Build time limit reached. The next runner will continue from the saved cache.'
           fi
       - name: Save completed upstream modules
-        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' }}
+        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' && steps.upstream.outputs.cache-key != steps.seed.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.border.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.spectral.outputs.cache-matched-key }}
         uses: actions/cache/save@v6
         with:
           path: |

@@ -79,7 +79,7 @@ where $f_r(N)$ denotes the largest size of a set avoiding the required $r$ integ
 
 On pushes and pull requests, GitHub Actions builds the pinned OpenAI sunflower theorem and checks all three unconditional declarations. Lean Comparator compares statement-only exports against a challenge generated from the pinned FC source. Lean checks that each proof has the exact FC type, and `#print axioms` enforces the allowlist of `propext`, `Classical.choice`, and `Quot.sound`. `leanchecker` replays this repository's compiled declarations using the pinned imports. [GitHub workflow](.github/workflows/lean.yml) · [Comparator check](verification/Compare.lean)
 
-The upstream build can continue from cached modules across up to three runners. Once it finishes, that runner performs the Comparator check and proof replay. [Resumable build](.github/workflows/comparator.yml)
+Two runners build the BorderVNP and SpectralBooks dependencies in parallel. The final build restores both caches and can resume on a fresh runner if it reaches the time limit. The runner that finishes the build runs Comparator and replays the proofs. [Build workflow](.github/workflows/comparator.yml)
 
 ### Certification within 90 days
 
