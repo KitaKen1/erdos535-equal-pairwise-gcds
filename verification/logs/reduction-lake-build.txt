@@ -1,0 +1,7 @@
+✔ [2059/2065] Built Erdos535.Statement (6.7s)
+✔ [2060/2065] Built Erdos535.Encoding (6.2s)
+✔ [2061/2065] Built Erdos535.Strong (7.0s)
+✔ [2062/2065] Built Erdos535.Counting (7.0s)
+✔ [2063/2065] Built Erdos535.UpperBound (10s)
+✔ [2064/2065] Built Erdos535.Reduction (8.1s)
+Build completed successfully (2065 jobs).
