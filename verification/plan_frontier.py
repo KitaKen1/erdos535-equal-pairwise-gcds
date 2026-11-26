@@ -8,6 +8,7 @@ import re
 
 
 TARGET = "OAI.Combinatorics.Sunflower.FixedBase"
+LONG_MODULE = "OAI.Computability.BorderVNP.DiagonalCalendarGuardedRegisteredPacket"
 IMPORT = re.compile(r"(?:(?:public|meta|private)\s+)*import\s+(?:all\s+)?([\w.]+)")
 COMMENTS = re.compile(r"/-|-/|--|\n")
 
@@ -71,16 +72,20 @@ def ready_modules(root):
 
 
 def partition(ready, count=12):
-    buckets = [[] for _ in range(min(count, len(ready)))]
+    regular = {module: weight for module, weight in ready.items() if module != LONG_MODULE}
+    buckets = [[] for _ in range(min(count, len(regular)))]
     weights = [0] * len(buckets)
-    for module in sorted(ready, key=lambda name: (-ready[name], name)):
+    for module in sorted(regular, key=lambda name: (-regular[name], name)):
         index = min(range(len(buckets)), key=weights.__getitem__)
         buckets[index].append(module)
-        weights[index] += ready[module]
-    return [
-        {"slot": index, "targets": " ".join(reversed(modules))}
+        weights[index] += regular[module]
+    jobs = [
+        {"slot": index, "targets": " ".join(reversed(modules)), "budget": "35m", "timeout": 65}
         for index, modules in enumerate(buckets, 1)
     ]
+    if LONG_MODULE in ready:
+        jobs.append({"slot": "registered-packet", "targets": LONG_MODULE, "budget": "275m", "timeout": 310})
+    return jobs
 
 
 if __name__ == "__main__":

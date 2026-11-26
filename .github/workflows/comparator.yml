@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     # The caller requires an explicit proof-verification result. A lost runner can be retried.
     continue-on-error: true
-    timeout-minutes: 130
+    timeout-minutes: 330
     env:
       OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
       COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
@@ -96,7 +96,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/openai-math/lean"
           status=0
-          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" 90m +OAI.Combinatorics.Sunflower.FixedBase:olean \
+          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" 255m +OAI.Combinatorics.Sunflower.FixedBase:olean \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
           if [[ "$status" != 0 ]] && grep -q 'Finished with result: oom-kill' "$GITHUB_WORKSPACE/verification/results/upstream-build.log"; then
             status=137

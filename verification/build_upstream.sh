@@ -8,7 +8,7 @@ memory_max=$((mem_kib * 1024 * 85 / 100))
 memory_high=$((memory_max * 92 / 100))
 echo "Reserving $((mem_kib / 1024 - memory_max / 1024 / 1024)) MiB outside the Lean build."
 
-if [[ "$minutes" == 90m ]]; then
+if [[ "$minutes" != 35m ]]; then
   (
     while true; do
       sleep 300 &

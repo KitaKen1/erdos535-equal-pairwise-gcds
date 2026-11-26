@@ -61,10 +61,11 @@ jobs:
           fi
 
   build:
+    name: Build shard ${{ matrix.slot }}
     needs: plan
     if: needs.plan.outputs.has-work == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 65
+    timeout-minutes: ${{ matrix.timeout }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -93,6 +94,7 @@ jobs:
         if: steps.seed.outputs.cache-hit == 'true'
         env:
           MODULES: ${{ matrix.targets }}
+          BUILD_BUDGET: ${{ matrix.budget }}
         run: |
           cd "$RUNNER_TEMP/openai-math/lean"
           touch "$RUNNER_TEMP/frontier-start"
@@ -102,7 +104,7 @@ jobs:
             targets+=("+$module:olean")
           done
           status=0
-          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" 35m "${targets[@]}" || status=$?
+          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" "$BUILD_BUDGET" "${targets[@]}" || status=$?
           echo "Build status $status"
           for directory in .lake/build .lake/packages/lemmata/lean/.lake/build .lake/packages/fixed-point-theorems/.lake/build; do
             if [[ -d "$directory" ]]; then
