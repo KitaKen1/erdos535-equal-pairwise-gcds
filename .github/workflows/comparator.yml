@@ -16,11 +16,15 @@ on:
         type: string
       spectral-cache:
         type: string
+      writer-cache:
+        type: string
     outputs:
       verified:
         value: ${{ jobs.audit.outputs.verified }}
       cache-key:
         value: ${{ jobs.audit.outputs.cache-key }}
+      fatal:
+        value: ${{ jobs.audit.outputs.fatal }}
 
 permissions:
   contents: read
@@ -34,8 +38,11 @@ jobs:
     outputs:
       verified: ${{ steps.compare.outputs.verified || 'false' }}
       cache-key: ${{ steps.upstream.outputs.cache-key }}
+      fatal: ${{ steps.upstream.outputs.fatal || (steps.compare.outcome == 'failure' && 'true') || 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 95
+    # The caller requires an explicit proof-verification result. A lost runner can be retried.
+    continue-on-error: true
+    timeout-minutes: 80
     env:
       OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
       COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
@@ -97,6 +104,16 @@ jobs:
             ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
             ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
           key: ${{ inputs.spectral-cache }}
+      - name: Restore the report-writer branch
+        id: writer
+        if: inputs.writer-cache != '' && inputs.writer-cache != inputs.border-cache && inputs.writer-cache != inputs.spectral-cache && !contains(steps.border.outputs.cache-matched-key, '-complete-') && !contains(steps.spectral.outputs.cache-matched-key, '-complete-')
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/openai-math/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
+          key: ${{ inputs.writer-cache }}
       - name: Build the upstream sunflower theorem
         id: upstream
         env:
@@ -104,17 +121,28 @@ jobs:
           STAGE: ${{ inputs.stage }}
           TARGET: ${{ inputs.target }}
           CACHE_PREFIX: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}
-          RESTORED_KEY: ${{ steps.spectral.outputs.cache-matched-key || steps.border.outputs.cache-matched-key || steps.seed.outputs.cache-matched-key }}
+          RESTORED_KEY: ${{ steps.writer.outputs.cache-matched-key || steps.spectral.outputs.cache-matched-key || steps.border.outputs.cache-matched-key || steps.seed.outputs.cache-matched-key }}
         run: |
           cd "$RUNNER_TEMP/openai-math/lean"
           full_target=OAI.Combinatorics.Sunflower.FixedBase
-          if [[ "$TARGET" != "$full_target" && "$RESTORED_KEY" == "$CACHE_PREFIX-complete-"* ]]; then
+          target_path=${TARGET//./\/}
+          if [[ "$TARGET" != "$full_target" && -n "$RESTORED_KEY" && -f ".lake/build/lib/lean/$target_path.olean" ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "cache-key=$RESTORED_KEY" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          mem_kib=$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)
+          memory_max=$((mem_kib * 1024 * 85 / 100))
+          memory_high=$((memory_max * 92 / 100))
+          echo "Reserving $((mem_kib / 1024 - memory_max / 1024 / 1024)) MiB outside the Lean build."
           status=0
-          timeout --kill-after=30s 55m lake build "+$TARGET:olean" \
+          sudo -n systemd-run --wait --pipe --collect \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
+            --property="MemoryHigh=$memory_high" --property="MemoryMax=$memory_max" \
+            --property=OOMPolicy=kill --property=Nice=10 \
+            --setenv="HOME=$HOME" --setenv="PATH=$PATH" --setenv="LEAN_NUM_THREADS=$LEAN_NUM_THREADS" \
+            --setenv="RUNNER_TRACKING_ID=${RUNNER_TRACKING_ID:-}" \
+            /usr/bin/timeout --kill-after=30s 35m "$HOME/.elan/bin/lake" build "+$TARGET:olean" \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
           cache_suffix="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STAGE"
           if [[ "$status" == 0 && "$TARGET" == "$full_target" ]]; then
@@ -127,14 +155,18 @@ jobs:
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "cache-key=$CACHE_PREFIX-$cache_suffix" >> "$GITHUB_OUTPUT"
-            if [[ "$status" == 124 && "$CHECKPOINT" == true ]]; then
-              echo 'Build time limit reached. The next runner will continue from the saved cache.'
+            if [[ "$status" == 124 || "$status" == 137 ]]; then
+              echo "Build interrupted with status $status. Saving the compiled modules."
+              if [[ "$CHECKPOINT" != true ]]; then
+                exit "$status"
+              fi
             elif [[ "$status" != 0 ]]; then
+              echo 'fatal=true' >> "$GITHUB_OUTPUT"
               exit "$status"
             fi
           fi
       - name: Save completed upstream modules
-        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' && steps.upstream.outputs.cache-key != steps.seed.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.border.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.spectral.outputs.cache-matched-key }}
+        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' && steps.upstream.outputs.cache-key != steps.seed.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.border.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.spectral.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.writer.outputs.cache-matched-key }}
         uses: actions/cache/save@v6
         with:
           path: |

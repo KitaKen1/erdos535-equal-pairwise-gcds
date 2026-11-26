@@ -53,18 +53,27 @@ jobs:
       target: OAI.LinearAlgebra.SpectralBooks.CompanionGeometry
       checkpoint: true
 
+  prepare-writer:
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: writer
+      target: OAI.Computability.BorderVNP.DiagonalCalendarWriterPostChosenClock
+      checkpoint: true
+
   audit-first:
-    needs: [prepare-border, prepare-spectral]
+    needs: [prepare-border, prepare-spectral, prepare-writer]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: first
       checkpoint: true
       border-cache: ${{ needs.prepare-border.outputs.cache-key }}
       spectral-cache: ${{ needs.prepare-spectral.outputs.cache-key }}
+      writer-cache: ${{ needs.prepare-writer.outputs.cache-key }}
 
   audit-resume:
     needs: audit-first
-    if: needs.audit-first.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-first.result != 'skipped' && needs.audit-first.outputs.verified != 'true' && needs.audit-first.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: resume
@@ -72,7 +81,7 @@ jobs:
 
   audit-resume-2:
     needs: audit-resume
-    if: needs.audit-resume.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-resume.result != 'skipped' && needs.audit-resume.outputs.verified != 'true' && needs.audit-resume.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: resume-2
@@ -80,7 +89,7 @@ jobs:
 
   audit-resume-3:
     needs: audit-resume-2
-    if: needs.audit-resume-2.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-resume-2.result != 'skipped' && needs.audit-resume-2.outputs.verified != 'true' && needs.audit-resume-2.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: resume-3
@@ -88,7 +97,7 @@ jobs:
 
   audit-resume-4:
     needs: audit-resume-3
-    if: needs.audit-resume-3.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-resume-3.result != 'skipped' && needs.audit-resume-3.outputs.verified != 'true' && needs.audit-resume-3.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: resume-4
@@ -96,16 +105,75 @@ jobs:
 
   audit-resume-5:
     needs: audit-resume-4
-    if: needs.audit-resume-4.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-resume-4.result != 'skipped' && needs.audit-resume-4.outputs.verified != 'true' && needs.audit-resume-4.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: resume-5
       checkpoint: true
 
-  audit-final:
+  audit-resume-6:
     needs: audit-resume-5
-    if: needs.audit-resume-5.outputs.verified == 'false'
+    if: ${{ !cancelled() && needs.audit-resume-5.result != 'skipped' && needs.audit-resume-5.outputs.verified != 'true' && needs.audit-resume-5.outputs.fatal != 'true' }}
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-6
+      checkpoint: true
+
+  audit-resume-7:
+    needs: audit-resume-6
+    if: ${{ !cancelled() && needs.audit-resume-6.result != 'skipped' && needs.audit-resume-6.outputs.verified != 'true' && needs.audit-resume-6.outputs.fatal != 'true' }}
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-7
+      checkpoint: true
+
+  audit-resume-8:
+    needs: audit-resume-7
+    if: ${{ !cancelled() && needs.audit-resume-7.result != 'skipped' && needs.audit-resume-7.outputs.verified != 'true' && needs.audit-resume-7.outputs.fatal != 'true' }}
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-8
+      checkpoint: true
+
+  audit-resume-9:
+    needs: audit-resume-8
+    if: ${{ !cancelled() && needs.audit-resume-8.result != 'skipped' && needs.audit-resume-8.outputs.verified != 'true' && needs.audit-resume-8.outputs.fatal != 'true' }}
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-9
+      checkpoint: true
+
+  audit-final:
+    needs: audit-resume-9
+    if: ${{ !cancelled() && needs.audit-resume-9.result != 'skipped' && needs.audit-resume-9.outputs.verified != 'true' && needs.audit-resume-9.outputs.fatal != 'true' }}
     uses: ./.github/workflows/comparator.yml
     with:
       stage: final
       checkpoint: false
+
+  verification-result:
+    name: Require the reduction and unconditional Lean audits
+    if: ${{ !cancelled() }}
+    needs:
+      - reduction
+      - audit-first
+      - audit-resume
+      - audit-resume-2
+      - audit-resume-3
+      - audit-resume-4
+      - audit-resume-5
+      - audit-resume-6
+      - audit-resume-7
+      - audit-resume-8
+      - audit-resume-9
+      - audit-final
+    runs-on: ubuntu-24.04
+    env:
+      REDUCTION_RESULT: ${{ needs.reduction.result }}
+      PROOF_VERIFIED: ${{ contains(needs.*.outputs.verified, 'true') }}
+    steps:
+      - run: |
+          if [[ "$REDUCTION_RESULT" != success || "$PROOF_VERIFIED" != true ]]; then
+            echo 'The run must verify the exact types, axioms and proofs of all three unconditional theorems.'
+            exit 1
+          fi
