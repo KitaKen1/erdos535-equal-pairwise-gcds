@@ -9,16 +9,9 @@ on:
       checkpoint:
         required: true
         type: boolean
-      target:
+      seed-cache:
         type: string
-        default: OAI.Combinatorics.Sunflower.FixedBase
-      border-cache:
-        type: string
-      spectral-cache:
-        type: string
-      writer-cache:
-        type: string
-      serial-build:
+      restore-frontier:
         type: boolean
         default: false
     outputs:
@@ -28,8 +21,6 @@ on:
         value: ${{ jobs.audit.outputs.cache-key }}
       fatal:
         value: ${{ jobs.audit.outputs.fatal }}
-      serial-build:
-        value: ${{ jobs.audit.outputs.serial-build }}
 
 permissions:
   contents: read
@@ -44,16 +35,15 @@ jobs:
       verified: ${{ steps.compare.outputs.verified || 'false' }}
       cache-key: ${{ steps.upstream.outputs.cache-key }}
       fatal: ${{ steps.upstream.outputs.fatal || (steps.compare.outcome == 'failure' && 'true') || 'false' }}
-      serial-build: ${{ (inputs.serial-build || steps.upstream.outputs.serial-build == 'true') && 'true' || 'false' }}
     runs-on: ubuntu-24.04
     # The caller requires an explicit proof-verification result. A lost runner can be retried.
     continue-on-error: true
-    timeout-minutes: 80
+    timeout-minutes: 130
     env:
       OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
       COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
       LEAN_TOOLCHAIN: leanprover/lean4:v4.34.1
-      LEAN_NUM_THREADS: ${{ inputs.serial-build && '1' || '2' }}
+      LEAN_NUM_THREADS: "1"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,96 +56,53 @@ jobs:
       - name: Fetch the pinned OpenAI source and Mathlib cache
         run: |
           mkdir -p verification/results
-          git init "$RUNNER_TEMP/openai-math"
-          git -C "$RUNNER_TEMP/openai-math" remote add origin https://github.com/openai/math.git
-          git -C "$RUNNER_TEMP/openai-math" fetch --depth=1 --filter=blob:none origin "$OPENAI_MATH_COMMIT"
-          git -C "$RUNNER_TEMP/openai-math" sparse-checkout set lean
-          git -C "$RUNNER_TEMP/openai-math" checkout --detach "$OPENAI_MATH_COMMIT"
-          cd "$RUNNER_TEMP/openai-math/lean"
-          {
-            lake update
-            lake exe cache get Mathlib
-          } 2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-setup.log"
+          bash verification/setup_upstream.sh 2>&1 | tee verification/results/upstream-setup.log
       - name: Restore previous upstream build
         id: seed
-        if: inputs.border-cache == '' || inputs.spectral-cache == ''
         uses: actions/cache/restore@v6
         with:
           path: |
             ${{ runner.temp }}/openai-math/lean/.lake/build
             ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
             ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          key: ${{ inputs.seed-cache || format('erdos535-openai-{0}-{1}-{2}-{3}-{4}-{5}', runner.os, runner.arch, env.OPENAI_MATH_COMMIT, github.run_id, github.run_attempt, inputs.stage) }}
           restore-keys: |
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-complete-
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-${{ github.run_id }}-${{ github.run_attempt }}-
             erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-
-      - name: Restore the BorderVNP branch
-        id: border
-        if: inputs.border-cache != ''
-        uses: actions/cache/restore@v6
+      - name: Download compiled modules from the parallel jobs
+        id: frontier
+        if: inputs.restore-frontier
+        continue-on-error: true
+        uses: actions/download-artifact@v8
         with:
-          path: |
-            ${{ runner.temp }}/openai-math/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: ${{ inputs.border-cache }}
-      - name: Restore the SpectralBooks branch
-        id: spectral
-        if: inputs.spectral-cache != '' && inputs.spectral-cache != inputs.border-cache && !contains(steps.border.outputs.cache-matched-key, '-complete-')
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ runner.temp }}/openai-math/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: ${{ inputs.spectral-cache }}
-      - name: Restore the report-writer branch
-        id: writer
-        if: inputs.writer-cache != '' && inputs.writer-cache != inputs.border-cache && inputs.writer-cache != inputs.spectral-cache && !contains(steps.border.outputs.cache-matched-key, '-complete-') && !contains(steps.spectral.outputs.cache-matched-key, '-complete-')
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ runner.temp }}/openai-math/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
-            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
-          key: ${{ inputs.writer-cache }}
+          pattern: frontier-*
+          path: ${{ runner.temp }}/frontier
+      - name: Merge the parallel build outputs
+        if: inputs.restore-frontier && steps.frontier.outcome == 'success'
+        run: |
+          shopt -s nullglob
+          for archive in "$RUNNER_TEMP"/frontier/*/modules.tar.zst "$RUNNER_TEMP"/frontier/modules.tar.zst; do
+            [[ -f "$archive" ]] || continue
+            tar --zstd --no-same-owner --no-same-permissions -xf "$archive" -C "$RUNNER_TEMP/openai-math/lean"
+          done
       - name: Build the upstream sunflower theorem
         id: upstream
         env:
           CHECKPOINT: ${{ inputs.checkpoint }}
           STAGE: ${{ inputs.stage }}
-          TARGET: ${{ inputs.target }}
           CACHE_PREFIX: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}
-          RESTORED_KEY: ${{ steps.writer.outputs.cache-matched-key || steps.spectral.outputs.cache-matched-key || steps.border.outputs.cache-matched-key || steps.seed.outputs.cache-matched-key }}
+          RESTORED_KEY: ${{ steps.seed.outputs.cache-matched-key }}
         run: |
           cd "$RUNNER_TEMP/openai-math/lean"
-          full_target=OAI.Combinatorics.Sunflower.FixedBase
-          target_path=${TARGET//./\/}
-          if [[ "$TARGET" != "$full_target" && -n "$RESTORED_KEY" && -f ".lake/build/lib/lean/$target_path.olean" ]]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "cache-key=$RESTORED_KEY" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          mem_kib=$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)
-          memory_max=$((mem_kib * 1024 * 85 / 100))
-          memory_high=$((memory_max * 92 / 100))
-          echo "Reserving $((mem_kib / 1024 - memory_max / 1024 / 1024)) MiB outside the Lean build."
           status=0
-          sudo -n systemd-run --wait --pipe --collect \
-            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
-            --property="MemoryHigh=$memory_high" --property="MemoryMax=$memory_max" \
-            --property=OOMPolicy=kill --property=Nice=10 \
-            --setenv="HOME=$HOME" --setenv="PATH=$PATH" --setenv="LEAN_NUM_THREADS=$LEAN_NUM_THREADS" \
-            --setenv="RUNNER_TRACKING_ID=${RUNNER_TRACKING_ID:-}" \
-            /usr/bin/timeout --kill-after=30s 35m "$HOME/.elan/bin/lake" build "+$TARGET:olean" \
+          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" 90m +OAI.Combinatorics.Sunflower.FixedBase:olean \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
           if [[ "$status" != 0 ]] && grep -q 'Finished with result: oom-kill' "$GITHUB_WORKSPACE/verification/results/upstream-build.log"; then
-            echo 'serial-build=true' >> "$GITHUB_OUTPUT"
             status=137
           fi
           cache_suffix="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STAGE"
-          if [[ "$status" == 0 && "$TARGET" == "$full_target" ]]; then
+          if [[ "$status" == 0 ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
             if [[ "$RESTORED_KEY" == "$CACHE_PREFIX-complete-"* ]]; then
               echo "cache-key=$RESTORED_KEY" >> "$GITHUB_OUTPUT"
@@ -176,7 +123,7 @@ jobs:
             fi
           fi
       - name: Save completed upstream modules
-        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' && steps.upstream.outputs.cache-key != steps.seed.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.border.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.spectral.outputs.cache-matched-key && steps.upstream.outputs.cache-key != steps.writer.outputs.cache-matched-key }}
+        if: ${{ !cancelled() && steps.upstream.outputs.cache-key != '' && steps.upstream.outputs.cache-key != steps.seed.outputs.cache-matched-key }}
         uses: actions/cache/save@v6
         with:
           path: |

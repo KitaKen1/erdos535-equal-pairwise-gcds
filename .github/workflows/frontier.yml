@@ -1,0 +1,122 @@
+name: Build independent upstream modules
+
+on:
+  workflow_call:
+    outputs:
+      cache-key:
+        value: ${{ jobs.plan.outputs.cache-key }}
+      has-work:
+        value: ${{ jobs.plan.outputs.has-work }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
+  LEAN_NUM_THREADS: "1"
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      cache-key: ${{ steps.seed.outputs.cache-matched-key }}
+      has-work: ${{ steps.plan.outputs.has-work }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install elan
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://elan.lean-lang.org/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Fetch the pinned import graph
+        run: bash verification/setup_upstream.sh --plan
+      - name: Restore the upstream checkpoint
+        id: seed
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/openai-math/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
+          key: erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-complete-
+          restore-keys: |
+            erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-complete-
+            erdos535-openai-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENAI_MATH_COMMIT }}-
+      - name: Assign modules whose imports are already built
+        id: plan
+        if: steps.seed.outputs.cache-matched-key != '' && !contains(steps.seed.outputs.cache-matched-key, '-complete-')
+        run: |
+          matrix=$(python3 verification/plan_frontier.py "$RUNNER_TEMP/openai-math/lean")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ "$matrix" != '{"include":[]}' ]]; then
+            echo 'has-work=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.has-work == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install elan
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://elan.lean-lang.org/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none --no-modify-path
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Fetch the upstream sources and Mathlib
+        run: bash verification/setup_upstream.sh
+      - name: Restore the shared checkpoint
+        id: seed
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ runner.temp }}/openai-math/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/lemmata/lean/.lake/build
+            ${{ runner.temp }}/openai-math/lean/.lake/packages/fixed-point-theorems/.lake/build
+          key: ${{ needs.plan.outputs.cache-key }}
+      - name: Build the assigned modules
+        if: steps.seed.outputs.cache-hit == 'true'
+        env:
+          MODULES: ${{ matrix.targets }}
+        run: |
+          cd "$RUNNER_TEMP/openai-math/lean"
+          touch "$RUNNER_TEMP/frontier-start"
+          read -r -a modules <<< "$MODULES"
+          targets=()
+          for module in "${modules[@]}"; do
+            targets+=("+$module:olean")
+          done
+          status=0
+          bash "$GITHUB_WORKSPACE/verification/build_upstream.sh" 35m "${targets[@]}" || status=$?
+          echo "Build status $status"
+          for directory in .lake/build .lake/packages/lemmata/lean/.lake/build .lake/packages/fixed-point-theorems/.lake/build; do
+            if [[ -d "$directory" ]]; then
+              find "$directory" -type f -newer "$RUNNER_TEMP/frontier-start" -print0
+            fi
+          done > "$RUNNER_TEMP/frontier-files"
+          if [[ -s "$RUNNER_TEMP/frontier-files" ]]; then
+            tar --zstd --null -cf "$RUNNER_TEMP/modules.tar.zst" -T "$RUNNER_TEMP/frontier-files"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.seed.outputs.cache-hit == 'true' }}
+        with:
+          name: frontier-${{ github.run_attempt }}-${{ matrix.slot }}
+          path: ${{ runner.temp }}/modules.tar.zst
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 7
