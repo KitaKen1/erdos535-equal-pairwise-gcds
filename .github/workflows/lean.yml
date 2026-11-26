@@ -70,9 +70,41 @@ jobs:
       stage: resume
       checkpoint: true
 
-  audit-final:
+  audit-resume-2:
     needs: audit-resume
     if: needs.audit-resume.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-2
+      checkpoint: true
+
+  audit-resume-3:
+    needs: audit-resume-2
+    if: needs.audit-resume-2.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-3
+      checkpoint: true
+
+  audit-resume-4:
+    needs: audit-resume-3
+    if: needs.audit-resume-3.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-4
+      checkpoint: true
+
+  audit-resume-5:
+    needs: audit-resume-4
+    if: needs.audit-resume-4.outputs.verified == 'false'
+    uses: ./.github/workflows/comparator.yml
+    with:
+      stage: resume-5
+      checkpoint: true
+
+  audit-final:
+    needs: audit-resume-5
+    if: needs.audit-resume-5.outputs.verified == 'false'
     uses: ./.github/workflows/comparator.yml
     with:
       stage: final

@@ -35,7 +35,7 @@ jobs:
       verified: ${{ steps.compare.outputs.verified || 'false' }}
       cache-key: ${{ steps.upstream.outputs.cache-key }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 95
     env:
       OPENAI_MATH_COMMIT: 3344da59991ed94f9ba711217b29c1d760badfa6
       COMPARATOR_COMMIT: fd5d5bcf14177b187f66d4502071268d877887c3
@@ -114,7 +114,7 @@ jobs:
             exit 0
           fi
           status=0
-          timeout --kill-after=30s 300m lake build "+$TARGET:olean" \
+          timeout --kill-after=30s 55m lake build "+$TARGET:olean" \
             2>&1 | tee "$GITHUB_WORKSPACE/verification/results/upstream-build.log" || status=$?
           cache_suffix="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$STAGE"
           if [[ "$status" == 0 && "$TARGET" == "$full_target" ]]; then
