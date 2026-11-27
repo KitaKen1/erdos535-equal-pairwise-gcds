@@ -84,7 +84,7 @@ def partition(ready, count=12):
         for index, modules in enumerate(buckets, 1)
     ]
     if LONG_MODULE in ready:
-        jobs.append({"slot": "registered-packet", "targets": LONG_MODULE, "budget": "275m", "timeout": 310})
+        jobs.append({"slot": "registered-packet", "targets": LONG_MODULE, "budget": "330m", "timeout": 355})
     return jobs
 
 
